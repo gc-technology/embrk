@@ -338,6 +338,28 @@ export default {
       return json({ success: true });
     }
 
+	// ─── CLAUDE PROMPT GENERATION ───────────────────────────────
+	if (url.pathname === '/api/generate-prompts' && method === 'POST') {
+	const body = await request.json() as any;
+
+	const response = await fetch('https://api.anthropic.com/v1/messages', {
+		method: 'POST',
+		headers: {
+		'Content-Type': 'application/json',
+		'x-api-key': env.ANTHROPIC_API_KEY,
+		'anthropic-version': '2023-06-01',
+		},
+		body: JSON.stringify({
+		model: 'claude-sonnet-4-5',
+		max_tokens: 2000,
+		messages: [{ role: 'user', content: body.prompt }],
+		}),
+	});
+
+	const data = await response.json() as any;
+	return json({ content: data.content });
+	}
+
     return json({ error: 'Not found' }, 404);
   },
 };

@@ -91,8 +91,8 @@ export default function Phase1Brief({ project, prompts, onProjectUpdate }) {
   };
 
   const removeReference = async (urlToRemove) => {
-    const existing = Array.isArray(project.reference_images) 
-      ? project.reference_images 
+    const existing = Array.isArray(project.reference_images)
+      ? project.reference_images
       : JSON.parse(project.reference_images || '[]');
     const updated = existing.filter((u) => u !== urlToRemove);
     await Project.update(project.id, { reference_images: JSON.stringify(updated) });
@@ -134,19 +134,10 @@ Respond with ONLY a JSON object in this exact format, no other text:
 }`;
 
     try {
-      const response = await fetch("https://api.anthropic.com/v1/messages", {
+      const response = await fetch(`${WORKER_URL}/api/generate-prompts`, {
         method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          "x-api-key": import.meta.env.VITE_ANTHROPIC_API_KEY,
-          "anthropic-version": "2023-06-01",
-          "anthropic-dangerous-direct-browser-access": "true",
-        },
-        body: JSON.stringify({
-          model: "claude-sonnet-4-5",
-          max_tokens: 2000,
-          messages: [{ role: "user", content: userPrompt }],
-        }),
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ prompt: userPrompt }),
       });
 
       const data = await response.json();
@@ -169,7 +160,7 @@ Respond with ONLY a JSON object in this exact format, no other text:
       queryClient.invalidateQueries({ queryKey: ["prompts", project.id] });
     } catch (err) {
       console.error("Prompt generation failed:", err);
-      alert("Prompt generation failed. Check your API key in .env file.");
+      alert("Prompt generation failed. Check worker deployment.");
     }
 
     setIsGenerating(false);
