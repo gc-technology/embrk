@@ -6,7 +6,7 @@ import { Textarea } from "@/components/ui/textarea";
 import { Label } from "@/components/ui/label";
 import { Switch } from "@/components/ui/switch";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
-import { Mic, Type, Palette, Music, Download, Loader2, CheckCircle2, Sparkles, Play, Pause } from "lucide-react";
+import { Mic, Type, Palette, Music, Download, Loader2, CheckCircle2, Sparkles, Play, Pause, Video, Image } from "lucide-react";
 import { motion } from "framer-motion";
 import { VOICEOVER_ENGINES } from "@/lib/platformPresets";
 
@@ -27,6 +27,8 @@ export default function Phase4PostProcess({ project, images, videos }) {
   const [isPlaying, setIsPlaying] = useState(false);
   const [audioElement, setAudioElement] = useState(null);
   const [isProcessing, setIsProcessing] = useState(false);
+  const [selectedAssets, setSelectedAssets] = useState([]);
+  const [isExporting, setIsExporting] = useState(false);
 
   const approvedImages = images.filter((img) => img.status === "approved");
   const approvedVideos = videos.filter((v) => v.status === "approved");
@@ -95,12 +97,66 @@ export default function Phase4PostProcess({ project, images, videos }) {
     setIsProcessing(false);
   };
 
+  const toggleAssetSelection = (id) => {
+    setSelectedAssets(prev =>
+      prev.includes(id) ? prev.filter(a => a !== id) : [...prev, id]
+    );
+  };
+
+  const selectAll = () => {
+    const allIds = [
+      ...approvedImages.map(img => ({ id: img.id, url: img.image_url, type: 'image' })),
+      ...approvedVideos.map(v => ({ id: v.id, url: v.video_url, type: 'video' })),
+    ];
+    setSelectedAssets(allIds.map(a => a.id));
+  };
+
+  const clearSelection = () => setSelectedAssets([]);
+
+  const exportAssets = async () => {
+    const allAssets = [
+      ...approvedImages.map(img => ({ id: img.id, url: img.image_url, type: 'image', ext: 'jpg' })),
+      ...approvedVideos.map(v => ({ id: v.id, url: v.video_url, type: 'video', ext: 'mp4' })),
+    ];
+
+    const toExport = selectedAssets.length > 0
+      ? allAssets.filter(a => selectedAssets.includes(a.id))
+      : allAssets;
+
+    if (toExport.length === 0) return;
+
+    setIsExporting(true);
+
+    for (let i = 0; i < toExport.length; i++) {
+      const asset = toExport[i];
+      try {
+        const response = await fetch(asset.url);
+        const blob = await response.blob();
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement('a');
+        a.href = url;
+        a.download = `${project.title || 'embark'}-${asset.type}-${i + 1}.${asset.ext}`;
+        document.body.appendChild(a);
+        a.click();
+        document.body.removeChild(a);
+        URL.revokeObjectURL(url);
+        await new Promise(r => setTimeout(r, 500));
+      } catch (err) {
+        console.error('Export error for asset:', asset.url, err);
+      }
+    }
+
+    setIsExporting(false);
+  };
+
   const featureList = [
     { key: "voiceover", label: "AI Voiceover", description: "Generate a voiceover from text", icon: Mic },
     { key: "captions", label: "Auto Captions", description: "Generate and overlay captions", icon: Type },
     { key: "colorGrading", label: "Color Grading", description: "Apply cinematic color grading", icon: Palette },
     { key: "bgMusic", label: "Background Music", description: "Add AI-generated background music", icon: Music },
   ];
+
+  const totalApproved = approvedImages.length + approvedVideos.length;
 
   return (
     <div className="space-y-6">
@@ -131,36 +187,108 @@ export default function Phase4PostProcess({ project, images, videos }) {
       </Card>
 
       <Card className="bg-card border-border/50">
-        <CardHeader>
+        <CardHeader className="flex flex-row items-center justify-between">
           <CardTitle className="text-lg">Final Assets Preview</CardTitle>
+          {totalApproved > 0 && (
+            <div className="flex items-center gap-2">
+              <button onClick={selectAll} className="text-xs text-primary hover:underline">Select All</button>
+              {selectedAssets.length > 0 && (
+                <button onClick={clearSelection} className="text-xs text-muted-foreground hover:underline">Clear</button>
+              )}
+              {selectedAssets.length > 0 && (
+                <span className="text-xs text-muted-foreground">{selectedAssets.length} selected</span>
+              )}
+            </div>
+          )}
         </CardHeader>
         <CardContent>
-          <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
-            {approvedImages.map((img) => (
-              <motion.div
-                key={img.id}
-                whileHover={{ scale: 1.02 }}
-                className="relative aspect-square rounded-xl overflow-hidden border border-border/50 bg-secondary/30"
-              >
-                {img.image_url ? (
-                  <img src={img.image_url} alt="" className="w-full h-full object-cover" />
-                ) : (
-                  <div className="w-full h-full flex items-center justify-center text-muted-foreground text-xs">No image</div>
-                )}
-                <div className="absolute top-2 left-2">
-                  <Badge className="bg-green-500/90 text-white text-xs">
-                    <CheckCircle2 className="w-3 h-3 mr-1" />
-                    Approved
-                  </Badge>
+          {totalApproved === 0 ? (
+            <div className="text-center py-8 text-muted-foreground text-sm">
+              No approved assets yet. Complete previous phases first.
+            </div>
+          ) : (
+            <div className="space-y-4">
+              {approvedImages.length > 0 && (
+                <div>
+                  <div className="flex items-center gap-2 mb-3">
+                    <Image className="w-4 h-4 text-muted-foreground" />
+                    <span className="text-sm text-muted-foreground font-medium">Images</span>
+                  </div>
+                  <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+                    {approvedImages.map((img) => (
+                      <motion.div
+                        key={img.id}
+                        whileHover={{ scale: 1.02 }}
+                        onClick={() => toggleAssetSelection(img.id)}
+                        className={`relative aspect-square rounded-xl overflow-hidden border cursor-pointer transition-all ${
+                          selectedAssets.includes(img.id)
+                            ? 'border-primary ring-2 ring-primary/50'
+                            : 'border-border/50'
+                        } bg-secondary/30`}
+                      >
+                        {img.image_url ? (
+                          <img src={img.image_url} alt="" className="w-full h-full object-cover" />
+                        ) : (
+                          <div className="w-full h-full flex items-center justify-center text-muted-foreground text-xs">No image</div>
+                        )}
+                        <div className="absolute top-2 left-2">
+                          <Badge className="bg-green-500/90 text-white text-xs">
+                            <CheckCircle2 className="w-3 h-3 mr-1" />
+                            Approved
+                          </Badge>
+                        </div>
+                        {selectedAssets.includes(img.id) && (
+                          <div className="absolute inset-0 bg-primary/20 flex items-center justify-center">
+                            <CheckCircle2 className="w-8 h-8 text-primary" />
+                          </div>
+                        )}
+                      </motion.div>
+                    ))}
+                  </div>
                 </div>
-              </motion.div>
-            ))}
-            {approvedImages.length === 0 && (
-              <div className="col-span-4 text-center py-8 text-muted-foreground text-sm">
-                No approved assets yet. Complete previous phases first.
-              </div>
-            )}
-          </div>
+              )}
+
+              {approvedVideos.length > 0 && (
+                <div>
+                  <div className="flex items-center gap-2 mb-3">
+                    <Video className="w-4 h-4 text-muted-foreground" />
+                    <span className="text-sm text-muted-foreground font-medium">Videos</span>
+                  </div>
+                  <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+                    {approvedVideos.map((v) => (
+                      <motion.div
+                        key={v.id}
+                        whileHover={{ scale: 1.02 }}
+                        onClick={() => toggleAssetSelection(v.id)}
+                        className={`relative aspect-square rounded-xl overflow-hidden border cursor-pointer transition-all ${
+                          selectedAssets.includes(v.id)
+                            ? 'border-primary ring-2 ring-primary/50'
+                            : 'border-border/50'
+                        } bg-secondary/30`}
+                      >
+                        {v.video_url ? (
+                          <video src={v.video_url} className="w-full h-full object-cover" muted loop autoPlay playsInline />
+                        ) : (
+                          <div className="w-full h-full flex items-center justify-center text-muted-foreground text-xs">No video</div>
+                        )}
+                        <div className="absolute top-2 left-2">
+                          <Badge className="bg-green-500/90 text-white text-xs">
+                            <CheckCircle2 className="w-3 h-3 mr-1" />
+                            Approved
+                          </Badge>
+                        </div>
+                        {selectedAssets.includes(v.id) && (
+                          <div className="absolute inset-0 bg-primary/20 flex items-center justify-center">
+                            <CheckCircle2 className="w-8 h-8 text-primary" />
+                          </div>
+                        )}
+                      </motion.div>
+                    ))}
+                  </div>
+                </div>
+              )}
+            </div>
+          )}
         </CardContent>
       </Card>
 
@@ -252,11 +380,7 @@ export default function Phase4PostProcess({ project, images, videos }) {
                       </Button>
 
                       {generatedAudioUrl && (
-                        <Button
-                          variant="outline"
-                          onClick={togglePlayback}
-                          className="gap-2"
-                        >
+                        <Button variant="outline" onClick={togglePlayback} className="gap-2">
                           {isPlaying ? (
                             <><Pause className="w-4 h-4" /> Pause</>
                           ) : (
@@ -293,9 +417,21 @@ export default function Phase4PostProcess({ project, images, videos }) {
           {Object.values(features).filter(Boolean).length} features enabled
         </div>
         <div className="flex gap-3">
-          <Button variant="outline" disabled={approvedImages.length === 0}>
-            <Download className="w-4 h-4 mr-2" />
-            Export Assets
+          <Button
+            variant="outline"
+            disabled={totalApproved === 0 || isExporting}
+            onClick={exportAssets}
+          >
+            {isExporting ? (
+              <Loader2 className="w-4 h-4 mr-2 animate-spin" />
+            ) : (
+              <Download className="w-4 h-4 mr-2" />
+            )}
+            {isExporting
+              ? "Exporting..."
+              : selectedAssets.length > 0
+              ? `Export ${selectedAssets.length} Selected`
+              : "Export All Assets"}
           </Button>
           <Button
             onClick={handleProcess}

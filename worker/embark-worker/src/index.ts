@@ -357,7 +357,7 @@ export default {
 	});
 
 	const data = await response.json() as any;
-	return json({ content: data.content });
+	return json(data);
 	}
 
     return json({ error: 'Not found' }, 404);

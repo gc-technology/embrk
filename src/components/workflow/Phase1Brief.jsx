@@ -15,12 +15,57 @@ import { useQueryClient } from "@tanstack/react-query";
 
 const WORKER_URL = 'https://embark-worker.gideonconcepts7.workers.dev';
 
+const PROMPT_PRESETS = [
+  {
+    id: "product",
+    label: "🛍️ Product Photography",
+    text: "Clean studio lighting, professional product shot, sharp focus, minimal background, commercial quality",
+  },
+  {
+    id: "ugc",
+    label: "📱 UGC Style",
+    text: "Authentic user-generated content style, casual natural lighting, lifestyle feel, shot on phone aesthetic, relatable and genuine",
+  },
+  {
+    id: "editorial",
+    label: "🎨 Editorial",
+    text: "High fashion editorial style, dramatic lighting, artistic composition, magazine quality",
+  },
+  {
+    id: "lifestyle",
+    label: "🌿 Lifestyle",
+    text: "Natural light, warm tones, aspirational lifestyle, candid feel, bright and airy",
+  },
+  {
+    id: "cinematic",
+    label: "🎬 Cinematic",
+    text: "Cinematic color grading, dramatic shadows, wide angle, film quality, moody atmosphere",
+  },
+  {
+    id: "bold",
+    label: "⚡ Bold & Graphic",
+    text: "Bold colors, high contrast, graphic design aesthetic, eye-catching, social media optimized",
+  },
+];
+
+function parseImageList(value) {
+  if (!value) return [];
+  if (Array.isArray(value)) return value;
+  try {
+    return JSON.parse(value);
+  } catch {
+    return [];
+  }
+}
+
 export default function Phase1Brief({ project, prompts, onProjectUpdate }) {
   const [isGenerating, setIsGenerating] = useState(false);
-  const [uploading, setUploading] = useState(false);
+  const [uploadingPrimary, setUploadingPrimary] = useState(false);
+  const [uploadingStyle, setUploadingStyle] = useState(false);
   const [editingPromptId, setEditingPromptId] = useState(null);
   const [editText, setEditText] = useState("");
   const [editAction, setEditAction] = useState("");
+  const [activePresets, setActivePresets] = useState(new Set());
   const queryClient = useQueryClient();
 
   const [localFields, setLocalFields] = useState({
@@ -63,55 +108,113 @@ export default function Phase1Brief({ project, prompts, onProjectUpdate }) {
     onProjectUpdate();
   };
 
-  const handleReferenceUpload = async (e) => {
+  // --- Primary reference image (1 max) ---
+  const handlePrimaryUpload = async (e) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    setUploadingPrimary(true);
+
+    const formData = new FormData();
+    formData.append('file', file);
+
+    const res = await fetch(`${WORKER_URL}/api/upload`, {
+      method: 'POST',
+      body: formData,
+    });
+    const data = await res.json();
+
+    if (data.url) {
+      await Project.update(project.id, {
+        reference_images: JSON.stringify([data.url]),
+      });
+      onProjectUpdate();
+    }
+
+    setUploadingPrimary(false);
+    e.target.value = "";
+  };
+
+  const removePrimaryReference = async () => {
+    await Project.update(project.id, { reference_images: JSON.stringify([]) });
+    onProjectUpdate();
+  };
+
+  // --- Style reference images (up to 4) ---
+  const handleStyleUpload = async (e) => {
     const files = Array.from(e.target.files);
     if (!files.length) return;
-    setUploading(true);
 
+    const existing = parseImageList(project.style_references);
+    const remaining = 4 - existing.length;
+    if (remaining <= 0) return;
+
+    setUploadingStyle(true);
     const urls = [];
-    for (const file of files) {
+
+    for (const file of files.slice(0, remaining)) {
       const formData = new FormData();
       formData.append('file', file);
-
       const res = await fetch(`${WORKER_URL}/api/upload`, {
         method: 'POST',
         body: formData,
       });
-
       const data = await res.json();
       if (data.url) urls.push(data.url);
     }
 
-    const existing = project.reference_images || [];
     await Project.update(project.id, {
-      reference_images: JSON.stringify([...existing, ...urls]),
+      style_references: JSON.stringify([...existing, ...urls]),
     });
     onProjectUpdate();
-    setUploading(false);
+    setUploadingStyle(false);
+    e.target.value = "";
   };
 
-  const removeReference = async (urlToRemove) => {
-    const existing = Array.isArray(project.reference_images)
-      ? project.reference_images
-      : JSON.parse(project.reference_images || '[]');
+  const removeStyleReference = async (urlToRemove) => {
+    const existing = parseImageList(project.style_references);
     const updated = existing.filter((u) => u !== urlToRemove);
-    await Project.update(project.id, { reference_images: JSON.stringify(updated) });
+    await Project.update(project.id, { style_references: JSON.stringify(updated) });
     onProjectUpdate();
   };
 
-  const getReferenceImages = () => {
-    if (!project.reference_images) return [];
-    if (Array.isArray(project.reference_images)) return project.reference_images;
-    try {
-      return JSON.parse(project.reference_images);
-    } catch {
-      return [];
+  // --- Preset chips ---
+  const handlePresetClick = (preset) => {
+    const next = new Set(activePresets);
+    if (next.has(preset.id)) {
+      next.delete(preset.id);
+    } else {
+      next.add(preset.id);
+    }
+    setActivePresets(next);
+
+    const current = localFields.style_notes;
+    const alreadyContains = current.includes(preset.text);
+
+    if (!alreadyContains && !activePresets.has(preset.id)) {
+      // Adding
+      const updated = current ? `${current} ${preset.text}` : preset.text;
+      setLocalFields((f) => ({ ...f, style_notes: updated }));
+      Project.update(project.id, { style_notes: updated }).then(onProjectUpdate);
     }
   };
 
+  // --- Prompt generation ---
   const generatePrompts = async () => {
     setIsGenerating(true);
     const preset = PLATFORM_PRESETS[project.platform] || {};
+    const primaryImages = parseImageList(project.reference_images);
+    const styleImages = parseImageList(project.style_references);
+
+    const hasPrimary = primaryImages.length > 0;
+    const hasStyle = styleImages.length > 0;
+
+    const referenceNote = hasPrimary
+      ? `\nReference Image: A primary reference image has been uploaded. Each prompt must instruct the AI image generator to use it as the main subject.`
+      : "";
+
+    const styleNote = hasStyle
+      ? `\nStyle References: The user has uploaded style/mood reference images. Incorporate their visual style, color palette, and mood into each prompt.`
+      : "";
 
     const userPrompt = `You are a creative director specializing in AI-generated visual content. Based on the following project brief, generate 3 distinct creative prompts for AI image generation. Each prompt should be detailed, vivid, and optimized for AI image generators.
 
@@ -120,7 +223,7 @@ Background: ${project.description || "Not specified"}
 Goal/CTA: ${project.goal || "Not specified"}
 Target Platform: ${preset.label || project.platform || "General"}
 Aspect Ratio: ${project.aspect_ratio || "Not specified"}
-Style Notes: ${project.style_notes || "Not specified"}
+Style Notes: ${project.style_notes || "Not specified"}${referenceNote}${styleNote}
 
 For each prompt also provide a brief action prompt describing what motion would work best if turned into a short video.
 
@@ -197,11 +300,14 @@ Respond with ONLY a JSON object in this exact format, no other text:
   };
 
   const approvedCount = prompts.filter((p) => p.status === "approved").length;
-  const referenceImages = getReferenceImages();
+  const primaryImages = parseImageList(project.reference_images);
+  const styleImages = parseImageList(project.style_references);
+  const primaryImage = primaryImages[0] || null;
 
   return (
     <div className="space-y-6">
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+        {/* Left column: Project Details */}
         <Card className="bg-card border-border/50">
           <CardHeader>
             <CardTitle className="text-lg">Project Details</CardTitle>
@@ -250,6 +356,7 @@ Respond with ONLY a JSON object in this exact format, no other text:
           </CardContent>
         </Card>
 
+        {/* Right column: Platform + Reference Images */}
         <div className="space-y-6">
           <Card className="bg-card border-border/50">
             <CardHeader>
@@ -314,25 +421,74 @@ Respond with ONLY a JSON object in this exact format, no other text:
             </CardContent>
           </Card>
 
+          {/* Primary Reference */}
           <Card className="bg-card border-border/50">
             <CardHeader>
-              <CardTitle className="text-lg">Reference Images</CardTitle>
+              <div>
+                <CardTitle className="text-lg">Primary Reference</CardTitle>
+                <p className="text-xs text-muted-foreground mt-0.5">The main subject or product to generate from</p>
+              </div>
             </CardHeader>
             <CardContent>
-              <div className="grid grid-cols-3 gap-3 mb-4">
+              {primaryImage ? (
+                <motion.div
+                  initial={{ opacity: 0, scale: 0.9 }}
+                  animate={{ opacity: 1, scale: 1 }}
+                  className="relative group aspect-video rounded-xl overflow-hidden border border-border/50"
+                >
+                  <img src={primaryImage} alt="" className="w-full h-full object-cover" />
+                  <button
+                    onClick={removePrimaryReference}
+                    className="absolute top-2 right-2 p-1.5 rounded-full bg-black/60 text-white opacity-0 group-hover:opacity-100 transition-opacity"
+                  >
+                    <X className="w-3.5 h-3.5" />
+                  </button>
+                </motion.div>
+              ) : (
+                <label className="flex items-center justify-center gap-2 p-6 rounded-xl border-2 border-dashed border-border/50 hover:border-primary/50 cursor-pointer transition-colors text-muted-foreground hover:text-foreground">
+                  {uploadingPrimary ? (
+                    <Loader2 className="w-5 h-5 animate-spin" />
+                  ) : (
+                    <Upload className="w-5 h-5" />
+                  )}
+                  <span className="text-sm font-medium">
+                    {uploadingPrimary ? "Uploading..." : "Upload primary image"}
+                  </span>
+                  <input
+                    type="file"
+                    accept="image/*"
+                    className="hidden"
+                    onChange={handlePrimaryUpload}
+                    disabled={uploadingPrimary}
+                  />
+                </label>
+              )}
+            </CardContent>
+          </Card>
+
+          {/* Style References */}
+          <Card className="bg-card border-border/50">
+            <CardHeader>
+              <div>
+                <CardTitle className="text-lg">Style & Color References</CardTitle>
+                <p className="text-xs text-muted-foreground mt-0.5">Mood board, color palette, or style inspiration</p>
+              </div>
+            </CardHeader>
+            <CardContent>
+              <div className="grid grid-cols-4 gap-2 mb-3">
                 <AnimatePresence>
-                  {referenceImages.map((url) => (
+                  {styleImages.map((url) => (
                     <motion.div
                       key={url}
                       initial={{ opacity: 0, scale: 0.8 }}
                       animate={{ opacity: 1, scale: 1 }}
                       exit={{ opacity: 0, scale: 0.8 }}
-                      className="relative group aspect-square rounded-xl overflow-hidden border border-border/50"
+                      className="relative group aspect-square rounded-lg overflow-hidden border border-border/50"
                     >
                       <img src={url} alt="" className="w-full h-full object-cover" />
                       <button
-                        onClick={() => removeReference(url)}
-                        className="absolute top-1.5 right-1.5 p-1 rounded-full bg-black/60 text-white opacity-0 group-hover:opacity-100 transition-opacity"
+                        onClick={() => removeStyleReference(url)}
+                        className="absolute top-1 right-1 p-1 rounded-full bg-black/60 text-white opacity-0 group-hover:opacity-100 transition-opacity"
                       >
                         <X className="w-3 h-3" />
                       </button>
@@ -340,29 +496,32 @@ Respond with ONLY a JSON object in this exact format, no other text:
                   ))}
                 </AnimatePresence>
               </div>
-              <label className="flex items-center justify-center gap-2 p-4 rounded-xl border-2 border-dashed border-border/50 hover:border-primary/50 cursor-pointer transition-colors text-muted-foreground hover:text-foreground">
-                {uploading ? (
-                  <Loader2 className="w-5 h-5 animate-spin" />
-                ) : (
-                  <Upload className="w-5 h-5" />
-                )}
-                <span className="text-sm font-medium">
-                  {uploading ? "Uploading..." : "Upload reference images"}
-                </span>
-                <input
-                  type="file"
-                  accept="image/*"
-                  multiple
-                  className="hidden"
-                  onChange={handleReferenceUpload}
-                  disabled={uploading}
-                />
-              </label>
+              {styleImages.length < 4 && (
+                <label className="flex items-center justify-center gap-2 p-4 rounded-xl border-2 border-dashed border-border/50 hover:border-primary/50 cursor-pointer transition-colors text-muted-foreground hover:text-foreground">
+                  {uploadingStyle ? (
+                    <Loader2 className="w-4 h-4 animate-spin" />
+                  ) : (
+                    <Upload className="w-4 h-4" />
+                  )}
+                  <span className="text-sm font-medium">
+                    {uploadingStyle ? "Uploading..." : `Upload style images (${styleImages.length}/4)`}
+                  </span>
+                  <input
+                    type="file"
+                    accept="image/*"
+                    multiple
+                    className="hidden"
+                    onChange={handleStyleUpload}
+                    disabled={uploadingStyle}
+                  />
+                </label>
+              )}
             </CardContent>
           </Card>
         </div>
       </div>
 
+      {/* Generated Prompts */}
       <Card className="bg-card border-border/50">
         <CardHeader className="flex flex-row items-center justify-between">
           <div>
@@ -371,12 +530,35 @@ Respond with ONLY a JSON object in this exact format, no other text:
               {approvedCount} approved · {prompts.length} total
             </p>
           </div>
-          <Button onClick={generatePrompts} disabled={isGenerating} className="bg-primary hover:bg-primary/90">
-            {isGenerating ? <Loader2 className="w-4 h-4 mr-2 animate-spin" /> : <Wand2 className="w-4 h-4 mr-2" />}
-            {isGenerating ? "Generating..." : "Generate Prompts"}
-          </Button>
         </CardHeader>
-        <CardContent>
+        <CardContent className="space-y-5">
+          {/* Prompt Presets */}
+          <div className="space-y-2">
+            <Label className="text-sm text-muted-foreground">Prompt Presets</Label>
+            <div className="flex gap-2 overflow-x-auto pb-1 scrollbar-hide">
+              {PROMPT_PRESETS.map((preset) => (
+                <button
+                  key={preset.id}
+                  onClick={() => handlePresetClick(preset)}
+                  className={`shrink-0 text-xs font-medium px-3 py-1.5 rounded-full border transition-colors whitespace-nowrap ${
+                    activePresets.has(preset.id)
+                      ? "bg-primary text-primary-foreground border-primary"
+                      : "bg-secondary/50 text-muted-foreground border-border/50 hover:border-primary/50 hover:text-foreground"
+                  }`}
+                >
+                  {preset.label}
+                </button>
+              ))}
+            </div>
+          </div>
+
+          <div className="flex justify-end">
+            <Button onClick={generatePrompts} disabled={isGenerating} className="bg-primary hover:bg-primary/90">
+              {isGenerating ? <Loader2 className="w-4 h-4 mr-2 animate-spin" /> : <Wand2 className="w-4 h-4 mr-2" />}
+              {isGenerating ? "Generating..." : "Generate Prompts"}
+            </Button>
+          </div>
+
           <div className="space-y-4">
             <AnimatePresence>
               {prompts.map((prompt) => (
