@@ -10,10 +10,12 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Upload, Wand2, Check, X, Loader2, Trash2, Pencil } from "lucide-react";
 import { PLATFORM_PRESETS, PROMPT_ENGINES } from "@/lib/platformPresets";
+import { useModesConfig, useFlavorOptions } from "@/hooks/useAdminConfig";
 import { motion, AnimatePresence } from "framer-motion";
 import { useQueryClient } from "@tanstack/react-query";
+import { cn } from "@/lib/utils";
 
-const WORKER_URL = 'https://embark-worker.gideonconcepts7.workers.dev';
+const WORKER_URL = import.meta.env.VITE_WORKER_URL ?? '';
 
 const PROMPT_PRESETS = [
   {
@@ -58,7 +60,20 @@ function parseImageList(value) {
   }
 }
 
-export default function Phase1Brief({ project, prompts, onProjectUpdate }) {
+export default function Phase1Brief({
+  project,
+  prompts,
+  onProjectUpdate,
+  promptMode,
+  promptCategory,
+  onPromptModeChange,
+  onPromptCategoryChange,
+  promptFlavors,
+  onPromptFlavorsChange,
+}) {
+  const modesConfig = useModesConfig();
+  const flavorOptions = useFlavorOptions();
+
   const [isGenerating, setIsGenerating] = useState(false);
   const [uploadingPrimary, setUploadingPrimary] = useState(false);
   const [uploadingStyle, setUploadingStyle] = useState(false);
@@ -216,14 +231,18 @@ export default function Phase1Brief({ project, prompts, onProjectUpdate }) {
       ? `\nStyle References: The user has uploaded style/mood reference images. Incorporate their visual style, color palette, and mood into each prompt.`
       : "";
 
-    const userPrompt = `You are a creative director specializing in AI-generated visual content. Based on the following project brief, generate 3 distinct creative prompts for AI image generation. Each prompt should be detailed, vivid, and optimized for AI image generators.
+    const flavorLines = promptFlavors
+      ? `\nOutput style per slot:\n- Prompt 1: ${flavorOptions.find((f) => f.slug === promptFlavors[1])?.name || "Stylized"} — ${flavorOptions.find((f) => f.slug === promptFlavors[1])?.description || ""}\n- Prompt 2: ${flavorOptions.find((f) => f.slug === promptFlavors[2])?.name || "Abstract"} — ${flavorOptions.find((f) => f.slug === promptFlavors[2])?.description || ""}\n- Prompt 3: ${flavorOptions.find((f) => f.slug === promptFlavors[3])?.name || "Literal"} — ${flavorOptions.find((f) => f.slug === promptFlavors[3])?.description || ""}`
+      : "";
+
+    const userPrompt = `Based on the following project brief, generate 3 distinct creative prompts for AI image generation. Each prompt should be detailed, vivid, and optimized for AI image generators.
 
 Project Title: ${project.title}
 Background: ${project.description || "Not specified"}
 Goal/CTA: ${project.goal || "Not specified"}
 Target Platform: ${preset.label || project.platform || "General"}
 Aspect Ratio: ${project.aspect_ratio || "Not specified"}
-Style Notes: ${project.style_notes || "Not specified"}${referenceNote}${styleNote}
+Style Notes: ${project.style_notes || "Not specified"}${referenceNote}${styleNote}${flavorLines}
 
 For each prompt also provide a brief action prompt describing what motion would work best if turned into a short video.
 
@@ -240,7 +259,11 @@ Respond with ONLY a JSON object in this exact format, no other text:
       const response = await fetch(`${WORKER_URL}/api/generate-prompts`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ prompt: userPrompt }),
+        body: JSON.stringify({
+          prompt: userPrompt,
+          mode: promptMode || undefined,
+          category: promptCategory || undefined,
+        }),
       });
 
       const data = await response.json();
@@ -304,8 +327,79 @@ Respond with ONLY a JSON object in this exact format, no other text:
   const styleImages = parseImageList(project.style_references);
   const primaryImage = primaryImages[0] || null;
 
+  const activeModeConfig = modesConfig.find((m) => m.slug === promptMode);
+
   return (
     <div className="space-y-6">
+      {/* Mode toggle + category picker */}
+      <Card className="bg-[#101010] border-border/50">
+        <CardContent className="p-4 space-y-4">
+          {/* Segmented control */}
+          <div>
+            <Label className="text-xs text-muted-foreground uppercase tracking-wider mb-2 block">
+              Generation Mode
+            </Label>
+            <div className="inline-flex items-center gap-1 bg-secondary/40 rounded-full p-1">
+              {modesConfig.map((m) => (
+                <button
+                  key={m.slug}
+                  onClick={() => onPromptModeChange(m.slug)}
+                  className={cn(
+                    "px-5 py-2 rounded-full text-sm font-semibold transition-all duration-200",
+                    promptMode === m.slug
+                      ? "bg-primary text-black shadow-sm"
+                      : "text-muted-foreground hover:text-foreground"
+                  )}
+                >
+                  {m.name}
+                </button>
+              ))}
+            </div>
+          </div>
+
+          {/* Category picker — shown once a mode is selected */}
+          <AnimatePresence mode="wait">
+            {activeModeConfig && (
+              <motion.div
+                key={promptMode}
+                initial={{ opacity: 0, y: 6 }}
+                animate={{ opacity: 1, y: 0 }}
+                exit={{ opacity: 0, y: -6 }}
+                transition={{ duration: 0.18 }}
+              >
+                <Label className="text-xs text-muted-foreground uppercase tracking-wider mb-2 block">
+                  Category
+                </Label>
+                <div className="flex flex-wrap gap-2">
+                  {activeModeConfig.categories.map((cat) => (
+                    <button
+                      key={cat.slug}
+                      onClick={() => onPromptCategoryChange(cat.slug)}
+                      className={cn(
+                        "px-4 py-1.5 rounded-full text-sm border transition-all duration-150",
+                        promptCategory === cat.slug
+                          ? "bg-primary text-black border-primary font-semibold"
+                          : "border-border/60 text-muted-foreground hover:border-primary/50 hover:text-foreground"
+                      )}
+                    >
+                      {cat.name}
+                    </button>
+                  ))}
+                </div>
+                {promptCategory && (
+                  <p className="text-xs text-primary/70 mt-2">
+                    Prompts will be optimised for{" "}
+                    <span className="font-semibold text-primary">
+                      {activeModeConfig.name} › {activeModeConfig.categories.find((c) => c.slug === promptCategory)?.name}
+                    </span>
+                  </p>
+                )}
+              </motion.div>
+            )}
+          </AnimatePresence>
+        </CardContent>
+      </Card>
+
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
         {/* Left column: Project Details */}
         <Card className="bg-card border-border/50">
@@ -552,11 +646,48 @@ Respond with ONLY a JSON object in this exact format, no other text:
             </div>
           </div>
 
+          {/* Per-slot flavor selects */}
+          {promptFlavors && (
+            <div className="space-y-2">
+              <Label className="text-xs text-muted-foreground uppercase tracking-wider">
+                Output Style per Slot
+              </Label>
+              <div className="grid grid-cols-3 gap-2">
+                {[1, 2, 3].map((slot) => (
+                  <div key={slot} className="space-y-1">
+                    <span className="text-[10px] text-muted-foreground/60">Prompt {slot}</span>
+                    <Select
+                      value={promptFlavors[slot] || "stylized"}
+                      onValueChange={(v) =>
+                        onPromptFlavorsChange({ ...promptFlavors, [slot]: v })
+                      }
+                    >
+                      <SelectTrigger className="bg-secondary/40 border-border/40 h-8 text-xs">
+                        <SelectValue />
+                      </SelectTrigger>
+                      <SelectContent>
+                        {flavorOptions.map((f) => (
+                          <SelectItem key={f.slug} value={f.slug} className="text-xs">
+                            {f.name}
+                          </SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
+
           <div className="flex justify-end">
-            <Button onClick={generatePrompts} disabled={isGenerating} className="bg-primary hover:bg-primary/90">
-              {isGenerating ? <Loader2 className="w-4 h-4 mr-2 animate-spin" /> : <Wand2 className="w-4 h-4 mr-2" />}
+            <button
+              onClick={generatePrompts}
+              disabled={isGenerating}
+              className="flex items-center gap-2 bg-primary text-black rounded-full px-5 py-2.5 text-sm font-bold hover:gap-3 transition-all duration-200 group disabled:opacity-50 disabled:pointer-events-none"
+            >
+              {isGenerating ? <Loader2 className="w-4 h-4 animate-spin" /> : <Wand2 className="w-4 h-4" />}
               {isGenerating ? "Generating..." : "Generate Prompts"}
-            </Button>
+            </button>
           </div>
 
           <div className="space-y-4">

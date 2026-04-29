@@ -5,7 +5,8 @@ module.exports = {
   theme: {
   	extend: {
   		fontFamily: {
-  			sans: ['var(--font-sans)'],
+  			sans: ['Almarai', 'var(--font-sans)', 'sans-serif'],
+  			serif: ['"Instrument Serif"', 'serif'],
   			mono: ['var(--font-mono)']
   		},
   		borderRadius: {

@@ -10,7 +10,7 @@ import { Mic, Type, Palette, Music, Download, Loader2, CheckCircle2, Sparkles, P
 import { motion } from "framer-motion";
 import { VOICEOVER_ENGINES } from "@/lib/platformPresets";
 
-const WORKER_URL = 'https://embark-worker.gideonconcepts7.workers.dev';
+const WORKER_URL = import.meta.env.VITE_WORKER_URL ?? '';
 
 export default function Phase4PostProcess({ project, images, videos }) {
   const [features, setFeatures] = useState({

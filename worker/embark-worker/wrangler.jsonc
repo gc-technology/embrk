@@ -23,7 +23,8 @@
 		{
 			"binding": "embark_db",
 			"database_name": "embark-db",
-			"database_id": "eb7fe3b0-bdbd-4760-babc-ebb84b81bc35"
+			"database_id": "eb7fe3b0-bdbd-4760-babc-ebb84b81bc35",
+			"migrations_dir": "migrations"
 		}
 	],
 	"r2_buckets": [

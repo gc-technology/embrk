@@ -3,15 +3,23 @@ import { GeneratedImage } from "@/entities/GeneratedImage";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
+import { Textarea } from "@/components/ui/textarea";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
-import { Image as ImageIcon, Loader2, Check, X, Trash2, RefreshCw, Download } from "lucide-react";
+import { Image as ImageIcon, Loader2, Check, X, Trash2, RefreshCw, Download, RotateCcw } from "lucide-react";
 import { IMAGE_ENGINES } from "@/lib/platformPresets";
 import { motion, AnimatePresence } from "framer-motion";
 import { useQueryClient } from "@tanstack/react-query";
 
-const WORKER_URL = 'https://embark-worker.gideonconcepts7.workers.dev';
+const WORKER_URL = import.meta.env.VITE_WORKER_URL ?? "";
 
-export default function Phase2Images({ project, prompts, images }) {
+export default function Phase2Images({
+  project,
+  prompts,
+  images,
+  editedPrompts,
+  onEditPrompt,
+  onResetPrompt,
+}) {
   const [selectedEngine, setSelectedEngine] = useState("nanobanana");
   const [generateMode, setGenerateMode] = useState("lite");
   const [generatingFor, setGeneratingFor] = useState(null);
@@ -25,29 +33,28 @@ export default function Phase2Images({ project, prompts, images }) {
     try { return JSON.parse(project.reference_images); } catch { return []; }
   };
 
-  const generateImages = async (prompt) => {
+  const generateImages = async (prompt, overrideText) => {
     setGeneratingFor(prompt.id);
 
+    const promptText = overrideText ?? editedPrompts[prompt.id] ?? prompt.prompt_text;
     const referenceImages = getReferenceImages();
     const referenceImageUrl = referenceImages.length > 0 ? referenceImages[0] : null;
     const variationCount = generateMode === "lite" ? 1 : 3;
 
-    const allVariations = [
-      prompt.prompt_text,
-      `${prompt.prompt_text} Use a slightly different composition and angle.`,
-      `${prompt.prompt_text} Use a different color palette and mood.`,
-    ];
-
-    const variations = allVariations.slice(0, variationCount);
+    const variations = [
+      promptText,
+      `${promptText} Use a slightly different composition and angle.`,
+      `${promptText} Use a different color palette and mood.`,
+    ].slice(0, variationCount);
 
     for (let i = 0; i < variations.length; i++) {
       try {
         const genRes = await fetch(`${WORKER_URL}/api/generate-image`, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
           body: JSON.stringify({
             prompt: variations[i],
-            aspect_ratio: project.aspect_ratio || '16:9',
+            aspect_ratio: project.aspect_ratio || "16:9",
             engine: selectedEngine,
             reference_image_url: referenceImageUrl,
           }),
@@ -58,9 +65,9 @@ export default function Phase2Images({ project, prompts, images }) {
         await GeneratedImage.create({
           project_id: project.id,
           prompt_id: prompt.id,
-          image_url: genData.image_url || '',
+          image_url: genData.image_url || "",
           engine: selectedEngine,
-          status: 'generated',
+          status: "generated",
           variation_index: i + 1,
         });
       } catch (err) {
@@ -90,11 +97,12 @@ export default function Phase2Images({ project, prompts, images }) {
 
   return (
     <div className="space-y-6">
-      <Card className="bg-card border-border/50">
+      {/* Engine controls */}
+      <Card className="bg-[#101010] border-border/50">
         <CardContent className="p-4">
           <div className="flex items-center justify-between flex-wrap gap-4">
             <div>
-              <h3 className="font-semibold">Image Engine</h3>
+              <h3 className="font-semibold text-foreground">Image Engine</h3>
               <p className="text-sm text-muted-foreground">
                 {approvedImages.length} images approved across {approvedPrompts.length} prompts
               </p>
@@ -110,7 +118,7 @@ export default function Phase2Images({ project, prompts, images }) {
                   onClick={() => setGenerateMode("lite")}
                   className={`px-3 py-1.5 rounded-md text-sm font-medium transition-colors ${
                     generateMode === "lite"
-                      ? "bg-primary text-white"
+                      ? "bg-primary text-black"
                       : "text-muted-foreground hover:text-foreground"
                   }`}
                 >
@@ -120,7 +128,7 @@ export default function Phase2Images({ project, prompts, images }) {
                   onClick={() => setGenerateMode("full")}
                   className={`px-3 py-1.5 rounded-md text-sm font-medium transition-colors ${
                     generateMode === "full"
-                      ? "bg-primary text-white"
+                      ? "bg-primary text-black"
                       : "text-muted-foreground hover:text-foreground"
                   }`}
                 >
@@ -174,37 +182,71 @@ export default function Phase2Images({ project, prompts, images }) {
 
       {approvedPrompts.map((prompt) => {
         const promptImages = getImagesForPrompt(prompt.id);
+        const currentText = editedPrompts[prompt.id] ?? prompt.prompt_text;
+        const isEdited = editedPrompts[prompt.id] !== undefined && editedPrompts[prompt.id] !== prompt.prompt_text;
+
         return (
-          <Card key={prompt.id} className="bg-card border-border/50">
-            <CardHeader className="flex flex-row items-start justify-between gap-4">
-              <div className="flex-1 min-w-0">
-                <p className="text-sm leading-relaxed line-clamp-2">{prompt.prompt_text}</p>
+          <Card key={prompt.id} className="bg-[#101010] border-border/50">
+            <CardHeader className="space-y-3">
+              {/* Always-editable prompt textarea */}
+              <div className="space-y-2">
+                <div className="flex items-center justify-between">
+                  <span className="text-xs text-muted-foreground uppercase tracking-wider font-medium">
+                    Image Prompt
+                  </span>
+                  <div className="flex items-center gap-2">
+                    {isEdited && (
+                      <span className="text-[10px] text-primary/70 bg-primary/10 px-2 py-0.5 rounded-full">
+                        edited
+                      </span>
+                    )}
+                    {isEdited && (
+                      <button
+                        onClick={() => onResetPrompt(prompt.id)}
+                        className="flex items-center gap-1 text-xs text-muted-foreground hover:text-foreground transition-colors"
+                      >
+                        <RotateCcw className="w-3 h-3" />
+                        Reset
+                      </button>
+                    )}
+                  </div>
+                </div>
+                <Textarea
+                  value={currentText}
+                  onChange={(e) => onEditPrompt(prompt.id, e.target.value)}
+                  className="bg-secondary/30 border-border/40 text-sm leading-relaxed min-h-[80px] resize-none focus:border-primary/50"
+                  rows={3}
+                />
                 {prompt.action_prompt && (
-                  <p className="text-xs text-muted-foreground mt-1 italic">
+                  <p className="text-xs text-muted-foreground italic">
                     🎬 {prompt.action_prompt}
                   </p>
                 )}
               </div>
-              <Button
-                size="sm"
-                onClick={() => generateImages(prompt)}
-                disabled={generatingFor === prompt.id}
-                className="shrink-0"
-              >
-                {generatingFor === prompt.id ? (
-                  <Loader2 className="w-4 h-4 mr-2 animate-spin" />
-                ) : promptImages.length > 0 ? (
-                  <RefreshCw className="w-4 h-4 mr-2" />
-                ) : (
-                  <ImageIcon className="w-4 h-4 mr-2" />
-                )}
-                {generatingFor === prompt.id
-                  ? "Generating..."
-                  : promptImages.length > 0
-                  ? "Regenerate"
-                  : `Generate ${generateMode === "lite" ? "1 Image" : "3 Images"}`}
-              </Button>
+
+              {/* Action buttons */}
+              <div className="flex items-center gap-2">
+                <button
+                  onClick={() => generateImages(prompt, currentText)}
+                  disabled={generatingFor === prompt.id}
+                  className="flex items-center gap-2 bg-primary text-black rounded-full px-4 py-2 text-xs font-bold hover:gap-3 transition-all duration-200 group disabled:opacity-50 disabled:pointer-events-none"
+                >
+                  {generatingFor === prompt.id ? (
+                    <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                  ) : promptImages.length > 0 ? (
+                    <RefreshCw className="w-3.5 h-3.5" />
+                  ) : (
+                    <ImageIcon className="w-3.5 h-3.5" />
+                  )}
+                  {generatingFor === prompt.id
+                    ? "Generating…"
+                    : promptImages.length > 0
+                    ? "Regenerate"
+                    : `Generate ${generateMode === "lite" ? "1 Image" : "3 Images"}`}
+                </button>
+              </div>
             </CardHeader>
+
             <CardContent>
               <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
                 <AnimatePresence>
@@ -260,7 +302,7 @@ export default function Phase2Images({ project, prompts, images }) {
                           <Button
                             size="icon"
                             className="h-8 w-8 bg-black/60 hover:bg-black/80 text-white"
-                            onClick={() => window.open(img.image_url, '_blank')}
+                            onClick={() => window.open(img.image_url, "_blank")}
                           >
                             <Download className="w-4 h-4" />
                           </Button>
@@ -279,7 +321,7 @@ export default function Phase2Images({ project, prompts, images }) {
                 </AnimatePresence>
                 {promptImages.length === 0 && !generatingFor && (
                   <div className="col-span-3 text-center py-8 text-muted-foreground text-sm">
-                    Click generate to create image{generateMode === "lite" ? "" : " variations"}
+                    Edit the prompt above if needed, then click Generate
                   </div>
                 )}
                 {generatingFor === prompt.id && (
@@ -287,7 +329,7 @@ export default function Phase2Images({ project, prompts, images }) {
                     <Loader2 className="w-5 h-5 animate-spin" />
                     <span className="text-sm">
                       Generating {generateMode === "lite" ? "1 image" : "3 variations"} via {selectedEngine}
-                      {referenceImages.length > 0 ? " (image-to-image)" : " (text-to-image)"}...
+                      {referenceImages.length > 0 ? " (image-to-image)" : " (text-to-image)"}…
                     </span>
                   </div>
                 )}

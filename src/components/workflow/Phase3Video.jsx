@@ -1,9 +1,10 @@
-import React, { useState } from "react";
+import React, { useState, useRef } from "react";
 import { GeneratedVideo } from "@/entities/GeneratedVideo";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+import { Switch } from "@/components/ui/switch";
 import { Textarea } from "@/components/ui/textarea";
 import { Label } from "@/components/ui/label";
 import { Video, Loader2, Check, Trash2 } from "lucide-react";
@@ -11,7 +12,20 @@ import { VIDEO_ENGINES } from "@/lib/platformPresets";
 import { motion, AnimatePresence } from "framer-motion";
 import { useQueryClient } from "@tanstack/react-query";
 
-const WORKER_URL = 'https://embark-worker.gideonconcepts7.workers.dev';
+const WORKER_URL = import.meta.env.VITE_WORKER_URL ?? '';
+
+const ENGINE_COST_LABELS = {
+  kling: '~$0.42+/clip',
+  veo: '~$1.60+/clip',
+};
+
+const COST_MAP = {
+  kling: {
+    audioOff: { '5': 0.42, '10': 0.84, '15': 1.26, '30': 2.52 },
+    audioOn:  { '5': 0.56, '10': 1.12, '15': 1.68, '30': 3.36 },
+  },
+  veo: { '4': 1.60, '6': 2.40, '8': 3.20 },
+};
 
 const ENGINE_DURATIONS = {
   kling: [
@@ -30,8 +44,10 @@ const ENGINE_DURATIONS = {
 export default function Phase3Video({ project, prompts, images, videos }) {
   const [selectedEngine, setSelectedEngine] = useState("kling");
   const [duration, setDuration] = useState("5");
+  const [generateAudio, setGenerateAudio] = useState(false);
   const [actionOverrides, setActionOverrides] = useState({});
   const [generatingFor, setGeneratingFor] = useState(null);
+  const inFlightRef = useRef({});
   const queryClient = useQueryClient();
 
   const approvedImages = images.filter((img) => img.status === "approved");
@@ -43,10 +59,14 @@ export default function Phase3Video({ project, prompts, images, videos }) {
     setSelectedEngine(engine);
     const durations = ENGINE_DURATIONS[engine] || ENGINE_DURATIONS.kling;
     setDuration(durations[0].value);
+    setGenerateAudio(false);
   };
 
   const generateVideo = async (image) => {
+    if (inFlightRef.current[image.id]) return;
+    inFlightRef.current[image.id] = true;
     setGeneratingFor(image.id);
+    console.log(`[EMBARK] Generating video for scene ${image.id} via ${selectedEngine} at ${new Date().toISOString()}`);
     const prompt = getPromptForImage(image);
     const actionPrompt = actionOverrides[image.id] || prompt?.action_prompt || '';
 
@@ -59,6 +79,7 @@ export default function Phase3Video({ project, prompts, images, videos }) {
           action_prompt: actionPrompt,
           engine: selectedEngine,
           duration: parseInt(duration),
+          generate_audio: generateAudio,
         }),
       });
 
@@ -77,10 +98,11 @@ export default function Phase3Video({ project, prompts, images, videos }) {
 
     } catch (err) {
       console.error('Video generation error:', err);
+    } finally {
+      delete inFlightRef.current[image.id];
+      queryClient.invalidateQueries({ queryKey: ["videos", project.id] });
+      setGeneratingFor(null);
     }
-
-    queryClient.invalidateQueries({ queryKey: ["videos", project.id] });
-    setGeneratingFor(null);
   };
 
   const updateVideoStatus = async (video, status) => {
@@ -106,31 +128,60 @@ export default function Phase3Video({ project, prompts, images, videos }) {
                 {approvedImages.length} approved images ready for video
               </p>
             </div>
-            <div className="flex items-center gap-3">
-              <Select value={selectedEngine} onValueChange={handleEngineChange}>
-                <SelectTrigger className="w-40 bg-secondary/50">
-                  <SelectValue />
-                </SelectTrigger>
-                <SelectContent>
-                  {VIDEO_ENGINES.map((e) => (
-                    <SelectItem key={e.id} value={e.id}>
-                      {e.label}
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
-              <Select value={duration} onValueChange={setDuration}>
-                <SelectTrigger className="w-32 bg-secondary/50">
-                  <SelectValue />
-                </SelectTrigger>
-                <SelectContent>
-                  {currentDurations.map((d) => (
-                    <SelectItem key={d.value} value={d.value}>
-                      {d.label}
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
+            <div className="flex flex-col items-end gap-2">
+              <div className="flex items-center gap-3">
+                <Select value={selectedEngine} onValueChange={handleEngineChange}>
+                  <SelectTrigger className="w-48 bg-secondary/50">
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {VIDEO_ENGINES.map((e) => (
+                      <SelectItem key={e.id} value={e.id}>
+                        {e.label} ({ENGINE_COST_LABELS[e.id]})
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+                <Select value={duration} onValueChange={setDuration}>
+                  <SelectTrigger className="w-32 bg-secondary/50">
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {currentDurations.map((d) => (
+                      <SelectItem key={d.value} value={d.value}>
+                        {d.label}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+                <div className="flex items-center gap-2">
+                  <Switch
+                    id="generate-audio"
+                    checked={generateAudio}
+                    onCheckedChange={setGenerateAudio}
+                  />
+                  <Label htmlFor="generate-audio" className="text-sm cursor-pointer">
+                    Generate Audio
+                    {selectedEngine === "kling" && (
+                      <span className="ml-1 text-xs text-destructive/80">
+                        Audio on adds ~$0.03/sec (~$0.14 extra for 5s clip)
+                      </span>
+                    )}
+                    {selectedEngine === "veo" && (
+                      <span className="ml-1 text-xs text-destructive/80">
+                        ⚠️ Veo charges $0.40/sec. A 4s clip = ~$1.60.
+                      </span>
+                    )}
+                  </Label>
+                </div>
+              </div>
+              <p className="text-xs text-amber-400">
+                Est. cost per clip: ~${(
+                  selectedEngine === 'kling'
+                    ? (generateAudio ? COST_MAP.kling.audioOn[duration] : COST_MAP.kling.audioOff[duration])
+                    : COST_MAP.veo[duration]
+                  ?? 0).toFixed(2)}
+              </p>
             </div>
           </div>
         </CardContent>

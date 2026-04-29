@@ -1,4 +1,4 @@
-const WORKER_URL = 'https://embark-worker.gideonconcepts7.workers.dev'
+const WORKER_URL = import.meta.env.VITE_WORKER_URL ?? ''
 
 export const GeneratedImage = {
   async create(data) {

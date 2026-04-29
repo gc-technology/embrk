@@ -7,6 +7,14 @@ import { AuthProvider, useAuth } from '@/lib/AuthContext';
 import UserNotRegisteredError from '@/components/UserNotRegisteredError';
 import Dashboard from '@/pages/Dashboard';
 import ProjectWorkflow from '@/pages/ProjectWorkflow';
+import AdminLogin from '@/pages/admin/AdminLogin';
+import AdminLayout from '@/pages/admin/AdminLayout';
+import AdminOverview from '@/pages/admin/AdminOverview';
+import AdminCategories from '@/pages/admin/AdminCategories';
+import AdminPrompts from '@/pages/admin/AdminPrompts';
+import AdminFlavors from '@/pages/admin/AdminFlavors';
+import AdminUsers from '@/pages/admin/AdminUsers';
+import AdminProfile from '@/pages/admin/AdminProfile';
 
 const AuthenticatedApp = () => {
   const { isLoadingAuth, isLoadingPublicSettings, authError, navigateToLogin } = useAuth();
@@ -36,6 +44,15 @@ const AuthenticatedApp = () => {
     <Routes>
       <Route path="/" element={<Dashboard />} />
       <Route path="/project/:id" element={<ProjectWorkflow />} />
+      <Route path="/admin/login" element={<AdminLogin />} />
+      <Route path="/admin" element={<AdminLayout />}>
+        <Route index element={<AdminOverview />} />
+        <Route path="categories" element={<AdminCategories />} />
+        <Route path="prompts" element={<AdminPrompts />} />
+        <Route path="flavors" element={<AdminFlavors />} />
+        <Route path="users" element={<AdminUsers />} />
+        <Route path="profile" element={<AdminProfile />} />
+      </Route>
       <Route path="*" element={<PageNotFound />} />
     </Routes>
   );
