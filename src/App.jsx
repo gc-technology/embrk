@@ -16,10 +16,13 @@ import AdminFlavors from '@/pages/admin/AdminFlavors';
 import AdminUsers from '@/pages/admin/AdminUsers';
 import AdminProfile from '@/pages/admin/AdminProfile';
 
+// Main app routes — wrapped in the Base44 auth check.
+// Admin routes are intentionally excluded so the app-level auth
+// cannot redirect away from /admin before AdminLayout's own token
+// guard runs.
 const AuthenticatedApp = () => {
   const { isLoadingAuth, isLoadingPublicSettings, authError, navigateToLogin } = useAuth();
 
-  // Show loading spinner while checking app public settings or auth
   if (isLoadingPublicSettings || isLoadingAuth) {
     return (
       <div className="fixed inset-0 flex items-center justify-center">
@@ -28,44 +31,43 @@ const AuthenticatedApp = () => {
     );
   }
 
-  // Handle authentication errors
   if (authError) {
     if (authError.type === 'user_not_registered') {
       return <UserNotRegisteredError />;
     } else if (authError.type === 'auth_required') {
-      // Redirect to login automatically
       navigateToLogin();
       return null;
     }
   }
 
-  // Render the main app
   return (
     <Routes>
       <Route path="/" element={<Dashboard />} />
       <Route path="/project/:id" element={<ProjectWorkflow />} />
-      <Route path="/admin/login" element={<AdminLogin />} />
-      <Route path="/admin" element={<AdminLayout />}>
-        <Route index element={<AdminOverview />} />
-        <Route path="categories" element={<AdminCategories />} />
-        <Route path="prompts" element={<AdminPrompts />} />
-        <Route path="flavors" element={<AdminFlavors />} />
-        <Route path="users" element={<AdminUsers />} />
-        <Route path="profile" element={<AdminProfile />} />
-      </Route>
       <Route path="*" element={<PageNotFound />} />
     </Routes>
   );
 };
 
-
 function App() {
-
   return (
     <AuthProvider>
       <QueryClientProvider client={queryClientInstance}>
         <Router>
-          <AuthenticatedApp />
+          <Routes>
+            {/* Admin routes — matched first, never touch AuthenticatedApp */}
+            <Route path="/admin/login" element={<AdminLogin />} />
+            <Route path="/admin" element={<AdminLayout />}>
+              <Route index element={<AdminOverview />} />
+              <Route path="categories" element={<AdminCategories />} />
+              <Route path="prompts" element={<AdminPrompts />} />
+              <Route path="flavors" element={<AdminFlavors />} />
+              <Route path="users" element={<AdminUsers />} />
+              <Route path="profile" element={<AdminProfile />} />
+            </Route>
+            {/* Everything else goes through the app-level auth check */}
+            <Route path="*" element={<AuthenticatedApp />} />
+          </Routes>
         </Router>
         <Toaster />
       </QueryClientProvider>
